@@ -1,0 +1,8 @@
+package.path = package.path .. ";./POSIX/lua/?.lua;"
+import MMKV from "ffi-mmkv"
+
+print(MMKV)
+
+a = MMKV("test", "/tmp/mmkv_test", true)
+a:set("hello", "world")
+print(a:get("hello"))

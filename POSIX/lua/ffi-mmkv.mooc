@@ -1,0 +1,329 @@
+--
+-- Copyright (c) 2019 lalawue
+--
+-- This library is free software; you can redistribute it and/or modify it
+-- under the terms of the MIT license. See LICENSE for details.
+--
+import FFI from "ffi"
+import Buffer from "string.buffer"
+
+otype = type
+otonumber = tonumber
+fcast = FFI.cast
+fstr = FFI.string
+fnew = FFI.new
+
+FFI.cdef([[
+
+/// @brief open mmkv
+/// @param map id (container)
+/// @param dir_path root dir for mmkv files
+/// @param multi_process 0 for single process
+/// @return context for LuaJIT side
+void* ffi_mmkv_open(const char *map_id, const char *dir_path, int multi_process);
+
+/// @brief close mmkv
+/// @param mctx context
+void ffi_mmkv_close(void *mctx);
+
+/// @brief entry count, including expired keys
+/// @param mctx context
+/// @return number
+int ffi_mmkv_count(void *mctx);
+
+/// @brief file size
+/// @param mctx
+/// @return number
+int ffi_mmkv_total_size(void *mctx);
+
+/// @brief return mmkv all keys vector<string>
+void * ffi_mmkv_all_keys(void *mctx);
+
+/// @brief return next key in all_keys()
+/// @param keys all_keys() return
+/// @param reclaim_now free resources in keys
+/// @return
+const char * ffi_mmkv_next_key(void *keys, int reclaim_now);
+
+/// @brief set value for key
+/// @param mctx context
+/// @param key key string
+/// @param value obj
+/// @param vlen value size
+/// @return 1 for success
+int ffi_mmkv_set(void *mctx, const char *key, const char *value, uint32_t vlen);
+
+struct ffi_mmkv_result {
+    uint32_t vsize; // value size
+    uint32_t vlen;  // output value length
+    char *value;    // value pointer
+};
+
+/// @brief caller create result struct base on input memory space
+struct ffi_mmkv_result * ffi_mmkv_tmp_result(uint8_t *tmp, uint32_t tmp_size);
+
+/// @brief get value with key from mmkv
+/// @param mctx context
+/// @param key key string
+/// @param r return result
+/// @return 1 for success, or < 0 for value space not satisfy, 0 for key not exist
+int ffi_mmkv_get(void *mctx, const char *key, struct ffi_mmkv_result *r);
+
+/// @brief check key -> value exist
+/// @param mctx
+/// @param key
+/// @return 1 for contains
+int ffi_mmkv_contains(void *mctx, const char *key);
+
+/// @brief remove key then return removed value
+/// @param mctx context
+/// @param key key string
+/// @param r return value holder
+/// @return 1 for success, or < 0 for value space not satisfy, 0 for key not exist
+int ffi_mmkv_rm(void *mctx, const char *key, struct ffi_mmkv_result *r);
+
+/// @brief reclaim removed key <-> value spaces
+/// @param mctx context
+void ffi_mmkv_trim(void *mctx);
+
+/// @brief reduce disk space usage
+/// @param mctx context
+void ffi_mmkv_clear(void *mctx);
+
+/// @brief enabled auto key expired
+/// @param mctx context
+/// @param seconds to expired
+/// @return 1 for success
+int ffi_mmkv_enable_auto_key_expired(void *mctx, uint32_t seconds);
+
+/// @brief diable auto key expired
+/// @param mctx context
+/// @return 1 for success
+int ffi_mmkv_disable_auto_key_expire(void *mctx);
+
+]])
+
+-- try to load mnet in package.cpath
+ret, _lib = nil, nil
+do {
+    loaded = false
+    suffix = (jit.os == "Windows") and "dll" or "so"
+    for cpath in package.cpath:gmatch("[^;]+") {
+        path = cpath:sub(1, cpath:len() - 2 - suffix:len()) .. "ffi-mmkv." .. suffix
+        ret, _lib = pcall(FFI.load, path)
+        if ret {
+            loaded = true
+            break
+        }
+    }
+    if not loaded {
+        error(_lib)
+    }
+}
+
+fn _checkValueBuffer(m, vsize) {
+    guard m._vsize < vsize + 1 else {
+        return
+    }
+    while m._vsize < vsize + 1 {
+        m._vsize = vsize + 512
+    }
+    m._vbuf = fnew("uint8_t[?]", m._vsize)
+    m._vr = _lib.ffi_mmkv_tmp_result(m._vbuf, m._vsize)
+}
+
+fn _get(m, key) {
+    guard otype(key) == "string" else {
+        return
+    }
+    while true {
+        ret = _lib.ffi_mmkv_get(m._ctx, key, m._vr)
+        if ret < 0 {
+            _checkValueBuffer(m, -ret)
+        } elseif ret == 1 {
+            bin = fstr(m._vr.value, m._vr.vlen)
+            return Buffer.decode(bin)
+        } else {
+            return
+        }
+    }
+}
+
+fn _set(m, key, value) {
+    guard otype(key) == "string" and value else {
+        return false
+    }
+    bin = Buffer.encode(value)
+    _checkValueBuffer(m, bin:len())
+    return 1 == _lib.ffi_mmkv_set(m._ctx, key, bin, bin:len())
+}
+
+fn _rm(m, key) {
+    guard otype(key) == "string" else {
+        return
+    }
+    while true {
+        ret = _lib.ffi_mmkv_rm(m._ctx, key, m._vr)
+        if ret < 0 {
+            _checkValueBuffer(m, -ret)
+        } elseif ret == 1 {
+            bin = fstr(m._vr.value, m._vr.vlen)
+            return Buffer.decode(bin)
+        } else {
+            return
+        }
+    }
+}
+
+class MMKV {
+
+    _ctx = false
+    _vsize = 0
+    _vbuf = false
+    _vr = false
+    _all_keys = false
+
+    --- init SmbDict
+    ---@param map_id string, container scope
+    ---@param fpath string, dict dir path, maximal 900 bytes
+    ---@param multi_process boolean, true for multi_process
+    fn init(map_id, fpath, multi_process) {
+        guard otype(map_id) == "string" and otype(fpath) == "string" else {
+            return false
+        }
+        self._ctx = _lib.ffi_mmkv_open(map_id, fpath, multi_process and 1 or 0)
+        guard self._ctx ~= nil else {
+            return false
+        }
+        self._vsize = 0
+        _checkValueBuffer(self, 1024)
+    }
+
+    --- clear all items
+    fn clear() {
+        if self._ctx {
+            _lib.ffi_mmkv_clear(self._ctx)
+            self._ctx = nil
+        }
+    }
+
+    --- items count
+    fn count() {
+        guard self._ctx else {
+            return 0
+        }
+        return otonumber(_lib.ffi_mmkv_count(self._ctx))
+    }
+
+    --- total size
+    fn totalSize() {
+        guard self._ctx else {
+            return 0
+        }
+        return otonumber(_lib.ffi_mmkv_total_size(self._ctx))
+    }
+
+    -- return true for contains key
+    fn contains(key) {
+        guard self._ctx and otype(key) == "string" else {
+            return false
+        }
+        return 1 == _lib.ffi_mmkv_contains(self._ctx, key)
+    }
+
+    --- get value from key
+    ---@param key string
+    fn get(key) {
+        guard self._ctx else {
+            return
+        }
+        return _get(self, key)
+    }
+
+    --- set key and Lua object
+    ---@param key string
+    ---@param value any Lua object, using LuaJIT string.buffer encode to get approximate value size
+    fn set(key, value) {
+        guard self._ctx else {
+            return
+        }
+        return _set(self, key, value)
+    }
+
+    --- rm key then return Lua object
+    ---@param key string
+    fn rm(key) {
+        guard self._ctx else {
+            return
+        }
+        return _rm(self, key)
+    }
+
+    -- return allKeys
+    fn allKeys() {
+        tbl = {}
+        guard self._ctx and self:count() > 0 else {
+            return tbl
+        }
+
+        keys = _lib.ffi_mmkv_all_keys(self._ctx)
+        guard keys else {
+            return tbl
+        }
+
+        repeat {
+            value = _lib.ffi_mmkv_next_key(keys, 0)
+            if value != nil {
+                tbl[#tbl + 1] = fstr(value)
+            }
+        } until value == nil
+        return tbl
+    }
+
+    -- trim size
+    fn trim() {
+        if self._ctx {
+            _lib.ffi_mmkv_trim(self._ctx)
+        }
+    }
+
+    -- clear all elements
+    fn clear() {
+        if self._ctx {
+            _lib.ffi_mmkv_clear(self._ctx)
+        }
+    }
+
+    --- generate table with __len, __index and __newindex
+    fn toDictionary() {
+        dctx = {
+            _ctx = self._ctx,
+            _vsize = self._vsize,
+            _vbuf = self._vbuf,
+            _vr = self._vr
+        }
+        return setmetatable({}, {
+            __tostring = { _ in
+                return "<class MMKV_Dictionary>"
+            },
+            __len = { _ in
+                return otonumber(_lib.smb_count())
+            },
+            __index = { _, key in
+                return _get(dctx, key)
+            },
+            __newindex = { _, key, value in
+                guard otype(key) == "string" else {
+                    return
+                }
+                if value {
+                    _set(dctx, key, value)
+                } else {
+                    _rm(dctx, key)
+                }
+            }
+        })
+    }
+}
+
+return MMKV

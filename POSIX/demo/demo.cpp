@@ -33,6 +33,9 @@
 #include <cstring>
 #include <cassert>
 #include <time.h>
+#include <math.h>
+#include <sys/time.h>
+#include <sys/resource.h>
 using namespace std;
 using namespace mmkv;
 

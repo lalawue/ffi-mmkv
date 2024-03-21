@@ -1,0 +1,20 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/Core/*"
+            ],
+            "defines": [
+                "MMKV_DISABLE_CRYPT",
+                "MMKV_DISABLE_FLUTTER",
+                "FORCE_POSIX"
+            ],
+            "intelliSenseMode": "linux-gcc-x64",
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "c11",
+            "cppStandard": "c++17"
+        }
+    ],
+    "version": 4
+}

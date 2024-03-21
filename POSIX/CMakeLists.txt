@@ -23,5 +23,5 @@ cmake_minimum_required(VERSION 3.10.0)
 project(MMKV)
 
 add_subdirectory(src)
-add_subdirectory(demo)
+#add_subdirectory(demo)
 
