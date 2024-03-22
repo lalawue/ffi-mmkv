@@ -43,7 +43,7 @@ const char * ffi_mmkv_next_key(void *keys, int reclaim_now);
 /// @param value obj
 /// @param vlen value size
 /// @return 1 for success
-int ffi_mmkv_set(void *mctx, const char *key, const char *value, uint32_t vlen);
+int ffi_mmkv_set(void *mctx, const char *key, const char *value, uint32_t vlen, uint32_t expire_duration);
 
 struct ffi_mmkv_result {
     uint32_t vsize; // value size
@@ -136,13 +136,14 @@ local function _get(m, key)
 		end
 	end
 end
-local function _set(m, key, value)
+local function _set(m, key, value, expired_duration)
 	if not (otype(key) == "string" and value) then
 		return false
 	end
 	local bin = Buffer.encode(value)
 	_checkValueBuffer(m, bin:len())
-	return 1 == _lib.ffi_mmkv_set(m._ctx, key, bin, bin:len())
+	expired_duration = (otype(expired_duration) == "number") and expired_duration or 0
+	return 1 == _lib.ffi_mmkv_set(m._ctx, key, bin, bin:len(), expired_duration)
 end
 local function _rm(m, key)
 	if not (otype(key) == "string") then
@@ -213,17 +214,27 @@ do
 		end
 		return _get(self, key)
 	end
-	function __ct:set(key, value)
+	function __ct:set(key, value, expired_duration)
 		if not (self._ctx) then
 			return 
 		end
-		return _set(self, key, value)
+		return _set(self, key, value, expired_duration)
 	end
 	function __ct:rm(key)
 		if not (self._ctx) then
 			return 
 		end
 		return _rm(self, key)
+	end
+	function __ct:setAutoKeyExpired(seconds)
+		if not (self._ctx and otype(seconds) == "number") then
+			return 
+		end
+		if seconds >= 0 then
+			_lib.ffi_mmkv_enable_auto_key_expired(self._ctx, seconds)
+		else 
+			_lib.ffi_mmkv_disable_auto_key_expire(self._ctx)
+		end
 	end
 	function __ct:allKeys()
 		local tbl = {  }

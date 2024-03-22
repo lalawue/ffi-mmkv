@@ -113,9 +113,10 @@ ffi_mmkv_next_key(void *keys, int reclaim_now)
 /// @param key key string
 /// @param value obj
 /// @param vlen value size
+/// @param expireDuration duration
 /// @return 1 for success
 extern "C" int
-ffi_mmkv_set(void *mctx, const char *key, void *value, uint32_t vlen)
+ffi_mmkv_set(void *mctx, const char *key, void *value, uint32_t vlen, uint32_t expire_duration)
 {
     if (mctx == NULL || key == NULL || value == NULL || vlen <= 0)
     {
@@ -124,7 +125,11 @@ ffi_mmkv_set(void *mctx, const char *key, void *value, uint32_t vlen)
     MMKV *mmkv = (MMKV *)mctx;
     string skey = key;
     MMBuffer sbuffer(value, vlen);
-    return true == mmkv->set(sbuffer, skey);
+    if (expire_duration > 0) {
+        return true == mmkv->set(sbuffer, skey, expire_duration);
+    } else {
+        return true == mmkv->set(sbuffer, skey);
+    }
 }
 
 struct ffi_mmkv_result {

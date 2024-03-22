@@ -51,7 +51,7 @@ const char * ffi_mmkv_next_key(void *keys, int reclaim_now);
 /// @param value obj
 /// @param vlen value size
 /// @return 1 for success
-int ffi_mmkv_set(void *mctx, const char *key, const char *value, uint32_t vlen);
+int ffi_mmkv_set(void *mctx, const char *key, const char *value, uint32_t vlen, uint32_t expire_duration);
 
 struct ffi_mmkv_result {
     uint32_t vsize; // value size
@@ -149,13 +149,14 @@ fn _get(m, key) {
     }
 }
 
-fn _set(m, key, value) {
+fn _set(m, key, value, expired_duration) {
     guard otype(key) == "string" and value else {
         return false
     }
     bin = Buffer.encode(value)
     _checkValueBuffer(m, bin:len())
-    return 1 == _lib.ffi_mmkv_set(m._ctx, key, bin, bin:len())
+    expired_duration = (otype(expired_duration) == "number") and expired_duration or 0
+    return 1 == _lib.ffi_mmkv_set(m._ctx, key, bin, bin:len(), expired_duration)
 }
 
 fn _rm(m, key) {
@@ -243,11 +244,12 @@ class MMKV {
     --- set key and Lua object
     ---@param key string
     ---@param value any Lua object, using LuaJIT string.buffer encode to get approximate value size
-    fn set(key, value) {
+    ---@param expired_duration > will set expired
+    fn set(key, value, expired_duration) {
         guard self._ctx else {
             return
         }
-        return _set(self, key, value)
+        return _set(self, key, value, expired_duration)
     }
 
     --- rm key then return Lua object
@@ -257,6 +259,18 @@ class MMKV {
             return
         }
         return _rm(self, key)
+    }
+
+    --- set key auto expired, 0 will cause every key has different expired duration
+    fn setAutoKeyExpired(seconds) {
+        guard self._ctx and otype(seconds) == "number" else {
+            return
+        }
+        if seconds >= 0 {
+            _lib.ffi_mmkv_enable_auto_key_expired(self._ctx, seconds)
+        } else {
+            _lib.ffi_mmkv_disable_auto_key_expire(self._ctx)
+        }
     }
 
     -- return allKeys
