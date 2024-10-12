@@ -1,7 +1,7 @@
 package = 'ffi-mmkv'
 version = '1.3.4-1'
 source = {
-   url = 'https://gitee.com/idol-group/MMKV.git',
+   url = 'git+https://github.com/lalawue/ffi-mmkv.git',
    tag = '1.3.4'
 }
 description = {
