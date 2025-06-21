@@ -1,7 +1,8 @@
 package = 'ffi-mmkv'
-version = 'scm-1'
+version = '1.3.5-1'
 source = {
-   url = 'https://gitee.com/lalawue/ffi-mmkv.git',
+   url = 'git+https://github.com/lalawue/ffi-mmkv.git',
+   tag = '1.3.5'
 }
 description = {
    summary = 'LuaJIT FFI interface for MMKV',
